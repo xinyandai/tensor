@@ -1,0 +1,26 @@
+dist: trusty
+sudo: required
+language:
+  - cpp
+compiler:
+  - gcc
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - gcc-8
+      - g++-8
+      - cmake
+before_script:
+  - sudo apt-get install libblas-dev liblapack-dev
+script:
+  - export CC=gcc-8
+  - export CXX=g++-8
+  # Check versions of gcc, g++ and cmake
+  - gcc-8 -v && g++-8 -v && cmake --version
+  # Run your build commands next\
+  - mkdir src/release
+  - cd src/release
+  - cmake ..
+  - make all
