@@ -14,8 +14,6 @@
 
 // -*- c++ -*-
 
-#include "utils.h"
-
 #include <cstdio>
 #include <cassert>
 #include <cstring>
@@ -38,6 +36,10 @@
  **************************************************/
 
 namespace tensor {
+
+float fvec_L2sqr (const float * x,
+                  const float * y,
+                  size_t d);
 
 #ifdef __AVX__
 #define USE_AVX

@@ -281,9 +281,18 @@ class Tensor {
     }
   }
 
+  void dump_shape() const {
+    std::cout << "shapes (";
+#pragma unroll
+    for (int i = 0; i < D; ++i) {
+      std::cout  << shape_[i] << ", " ;
+    }
+    std::cout << ")"<< std::endl;
+  }
+
   void dump() const {
     tensor::dump<T, D>(data_, stride_.data(), shape_.data());
-    std::cout << std::endl;
+    dump_shape();
   }
 
   Tensor<T, D, HOST> as_contiguous() const {
