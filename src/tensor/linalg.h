@@ -29,14 +29,20 @@ int dgemm_(
 
 
 namespace tensor {
+
 template<typename T>
 Tensor<T, 2> mm (
     const Tensor<T, 2> &a,
-    const Tensor<T, 2> &b) {
-  Tensor<T, 2> contiguous_a = a.as_contiguous();
-  Tensor<T, 2> contiguous_b = b.as_contiguous();
-  contiguous_a.dump();
-  contiguous_b.dump();
+    const Tensor<T, 2> &b,
+    Tensor<T, 2> *out) {
+  if ((!a.get_flag(FLAG_CONTIGUOUS)) && (!a.get_flag(FLAG_TRANSPOSED))) {
+    return mm(a.as_contiguous(), b, out);
+  }
+  if ((!b.get_flag(FLAG_CONTIGUOUS)) && (!b.get_flag(FLAG_TRANSPOSED))) {
+    return mm(a, b.as_contiguous(), out);
+  }
+  const char* T_A = a.get_flag(FLAG_CONTIGUOUS) ? "N" : "T";
+  const char* T_B = a.get_flag(FLAG_CONTIGUOUS) ? "N" : "T";
 //  M  specifies  the number  of rows  of the  matrix op( A )
 //  and of the  matrix  C.  M  must  be at least  zero.
   FINTEGER M = a.shape()[0];
@@ -46,25 +52,40 @@ Tensor<T, 2> mm (
 //  On entry,  K  specifies  the number of columns of the matrix
 //  op( A ) and the number of rows of the matrix op( B ).
   FINTEGER K = a.shape()[1];
-
 //  alpha*op( A )*op( B ) + beta*C
-  Tensor<T, 2> out({M, N});
   T alpha = 1.0f;
   T beta = 0.0f;
-  std::cout << "M = " << M << "; N = " << N << "; K = " << K << std::endl;
+
   if constexpr (std::is_same<T, float >::value) {
-    sgemm_("N", "N", &M, &N, &K,
+    sgemm_(T_A, T_B, &M, &N, &K,
            &alpha, a.data(),
            &M, b.data(), &K,
-           &beta, out.data(), &M);
+           &beta, out->data(), &M);
   } else if constexpr (std::is_same<T, double >::value) {
-    dgemm_("N", "N", &M, &N, &K,
+    dgemm_(T_A, T_B, &M, &N, &K,
            &alpha, a.data(),
            &M, b.data(), &K,
-           &beta, out.data(), &M);
+           &beta, out->data(), &M);
   }
-  std::cout << "M = " << M << "; N = " << N << "; K = " << K << std::endl;
+
+  return *out;
+}
+
+template<typename T>
+Tensor<T, 2> mm (
+    const Tensor<T, 2> &a,
+    const Tensor<T, 2> &b) {
+//  M  specifies  the number  of rows  of the  matrix op( A )
+//  and of the  matrix  C.  M  must  be at least  zero.
+  FINTEGER M = a.shape()[0];
+//  On entry,  N  specifies the number  of columns of the matrix
+//  op( B ) and the number of columns of the matrix C.
+  FINTEGER N = b.shape()[1];
+//  alpha*op( A )*op( B ) + beta*C
+  Tensor<T, 2> out({M, N});
+  mm(a, b, &out);
   return out;
 }
+
 } // namespace tensor
 #endif //TENSOR_CALCULATOR_H

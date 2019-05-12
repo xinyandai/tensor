@@ -7,6 +7,7 @@
 
 #define CHECK_SHAPE (true)
 #define FLAG_CONTIGUOUS (1<<0)
+#define FLAG_TRANSPOSED (1<<1)
 
 #include <array>
 #include <algorithm>
@@ -19,20 +20,19 @@ namespace tensor {
 template<typename T, size_type D, bool HOST=true>
 class Tensor {
  private:
-    template <size_type N, size_type R=D>
-    void _continuous_stride() {
-      static_assert(N <= R);
-      static_assert(N >= 0);
-      if constexpr (N > 0 ) {
-        if constexpr (N == R ) {
-          stride_[N-1] = 1;
-        } else {
-          stride_[N-1] = stride_[N] * shape_[N];
-        }
-        return _continuous_stride< N - 1, R>();
+  template <size_type N, size_type R=D>
+  void _continuous_stride() {
+    static_assert(N <= R);
+    static_assert(N >= 0);
+    if constexpr (N > 0 ) {
+      if constexpr (N == R ) {
+        stride_[N-1] = 1;
+      } else {
+        stride_[N-1] = stride_[N] * shape_[N];
       }
+      return _continuous_stride< N - 1, R>();
     }
-
+  }
   template <size_type R>
   void _check_shape (const Tensor<T, R, HOST> &t) {
     static_assert(R <= D);
@@ -50,7 +50,8 @@ class Tensor {
   }
 
  public:
-  Tensor<T, D, HOST> operator[] (std::array<Slice, D> slices) {
+  Tensor<T, D, HOST> operator[] (
+      std::array<Slice, D> slices) {
     Tensor<T, D, HOST> result;
     result.shape_ = {0};
     result.data_= data_;
@@ -83,22 +84,12 @@ class Tensor {
     return *offset;
   }
 
-  explicit Tensor()
-      :
-      size_(0),
-      shape_({0}),
-      data_(nullptr),
-      ptr_(data_),
-      flag_(0)  {}
+  explicit Tensor() : size_(0), shape_({0}),
+    data_(nullptr), ptr_(data_), flag_(0)  {}
 
-  explicit Tensor(
-      const std::array<size_type, D> & shapes)
-      :
-      size_(MULTIPLIER<size_type, D>(shapes)),
-      shape_(shapes),
-      data_(new T[size_]),
-      ptr_(data_),
-      flag_(FLAG_CONTIGUOUS) {
+  explicit Tensor(const std::array<size_type, D> & shapes) :
+  size_(MULTIPLIER<size_type, D>(shapes)), shape_(shapes),
+  data_(new T[size_]), ptr_(data_), flag_(FLAG_CONTIGUOUS) {
 
     this->_continuous_stride<D>();
   }
@@ -106,18 +97,15 @@ class Tensor {
   // reshape
   template <size_type R>
   Tensor(Tensor<T, R, HOST> &t,
-      const std::array<size_type, D> & shapes)
-      :
-      size_(MULTIPLIER<size_type, D>(shapes)),
-      shape_(shapes),
-      data_(t.data()),
-      ptr_(t.ptr()),
-      flag_(FLAG_CONTIGUOUS & (D == R))  {
+      const std::array<size_type, D> & shapes):
+  size_(MULTIPLIER<size_type, D>(shapes)), shape_(shapes),
+  data_(t.data()), ptr_(t.ptr()),
+  flag_(FLAG_CONTIGUOUS & (D == R))  {
 
     static_assert(D >= R);
     if (size_ == t.size()) {
       this->_continuous_stride<D>();
-    } else if (size_ > t.size() && size_ % t.size() == 0) {
+    } else if (size_ > t.size() && (size_ % t.size() == 0)) {
       this->_continuous_stride<R, R>();
 #pragma unroll
       for (int i = R; i < D; ++i) {
@@ -130,27 +118,9 @@ class Tensor {
   }
 
   // copying constructor
-  Tensor(const Tensor<T, D, HOST> &t):
-    size_(t.size_),
-    stride_(t.stride_),
-    shape_(t.shape_),
-    data_(t.data_),
-    ptr_(t.ptr_) ,
-    flag_(t.flag_) {}
-
-  Tensor(const Tensor<T, D, HOST> &t,
-      size_type axis_1, size_type axis_2) :
-      size_(t.size_),
-      stride_(t.stride_),
-      shape_(t.shape_),
-      data_(t.data_),
-      ptr_(t.ptr_),
-      flag_(t.flag_ & (!FLAG_CONTIGUOUS) )  {
-    shape_[axis_1] = t.shape_[axis_2];
-    shape_[axis_2] = t.shape_[axis_1];
-    stride_[axis_1] = t.stride_[axis_2];
-    stride_[axis_2] = t.stride_[axis_1];
-  }
+  Tensor(const Tensor<T, D, HOST> &t) : size_(t.size_),
+  stride_(t.stride_), shape_(t.shape_), data_(t.data_),
+  ptr_(t.ptr_) , flag_(t.flag_) {}
 
   // Move constructor.
   Tensor(const Tensor<T, D, HOST>&& t) noexcept
@@ -190,6 +160,7 @@ class Tensor {
     operation_by_stride<T, D, R >(
         data_, t.data(), stride_.data(), t.stride().data(),
         shape_.data(), assignment<T >());
+    return *this;
   }
   template <size_type R>
   Tensor& operator += (const Tensor<T, R, HOST> &t) {
@@ -264,15 +235,38 @@ class Tensor {
     return (Tensor<T, R, HOST>(*this, shapes));
   }
 
-  Tensor<T, D, HOST>
-  swap_axis (size_type axis_1, size_type axis_2) {
-    Tensor<T, D, HOST> copied(*this, axis_1, axis_2);
-    return (copied);
+  Tensor(const Tensor<T, D, HOST> &t,
+         size_type axis_1, size_type axis_2) :
+      size_(t.size_),
+      stride_(t.stride_),
+      shape_(t.shape_),
+      data_(t.data_),
+      ptr_(t.ptr_),
+      flag_(t.flag_ & (!FLAG_CONTIGUOUS) )  {
+
+
   }
+
+
 
   Tensor<T, D, HOST>
   transpose () {
-    return this->swap_axis(0, D-1);
+    Tensor<T, D, HOST> copied(*this);
+#pragma unroll
+    for (int i = 0; i < D ; ++i) {
+      copied.shape_[i] = shape_[D - i - 1];
+      copied.stride_[i] = stride_[D - i - 1];
+    }
+    if (get_flag(FLAG_CONTIGUOUS)) {
+      copied.unset_flag(FLAG_CONTIGUOUS);
+      copied.set_flag(FLAG_TRANSPOSED);
+    } else if (get_flag(FLAG_TRANSPOSED)){
+      copied.unset_flag(FLAG_TRANSPOSED);
+      copied.set_flag(FLAG_CONTIGUOUS);
+    } else {
+      // for the case that is not contiguous and not transposed
+    }
+    return (copied);
   }
 
   void fill(T value) {
@@ -299,8 +293,8 @@ class Tensor {
       Tensor<T, D, HOST> copied(this->shape());
       T *data = copied.data();
       operation_by_stride<T, D, D>(
-          copied.data(), data_, copied.stride_.data(), stride_.data(),
-          shape_.data(), assignment<T >());
+          copied.data(), data_, copied.stride_.data(),
+          stride_.data(), shape_.data(), assignment<T >());
       return copied;
     }
   }

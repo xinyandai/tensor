@@ -84,12 +84,14 @@ operation_by_stride(T *data, const T *source,
 
       if constexpr (source_N > 0) {
         operation_by_stride<T, data_N - 1, source_N - 1>(
-            data, source, stride_data + 1, stride_source + 1, shape + 1, f);
+            data, source, stride_data + 1,
+            stride_source + 1, shape + 1, f);
         data += *stride_data;
         source += *stride_source;
       } else {
         operation_by_stride<T, data_N - 1, 0>(
-            data, source, stride_data + 1, stride_source + 1, shape + 1, f);
+            data, source, stride_data + 1,
+            stride_source + 1, shape + 1, f);
         data += *stride_data;
       }
     }
