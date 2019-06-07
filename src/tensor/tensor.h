@@ -12,12 +12,13 @@
 #include <array>
 #include <algorithm>
 #include <memory>
+#include <random>
 #include <type_traits>
 #include "helper.h"
 
 namespace tensor {
 
-template<typename T, size_type D, bool HOST=true>
+template<typename T=float, size_type D=2, bool HOST=true>
 class Tensor {
  private:
   template <size_type N, size_type R=D>
@@ -75,7 +76,15 @@ class Tensor {
     result.ptr_= ptr_;
     return result;
   }
-  T operator[] (std::array<size_type , D> slices) {
+  const T& operator[] (std::array<size_type , D> slices) const {
+    T *offset = data_;
+#pragma unroll
+    for (int i = 0; i < D; ++i) {
+      offset += (stride_[i] * slices[i]);
+    }
+    return *offset;
+  }
+  T& operator[] (std::array<size_type , D> slices) {
     T *offset = data_;
 #pragma unroll
     for (int i = 0; i < D; ++i) {
@@ -243,28 +252,43 @@ class Tensor {
       data_(t.data_),
       ptr_(t.ptr_),
       flag_(t.flag_ & (!FLAG_CONTIGUOUS) )  {
-
-
   }
 
-
+  Tensor<T, D, HOST>
+  transpose () const {
+    return move_axis(0, -1);
+  }
 
   Tensor<T, D, HOST>
-  transpose () {
+  move_axis (size_type a, size_type b) const {
+    if (a==b)
+      return *this;
+    if (a < 0)
+      a += D;
+    if (b < 0)
+      b += D;
+    if (a >= D || b >=D)
+      throw std::runtime_error("the axis to be moved out of bound.");
+    if (a > b)
+      return move_axis(b, a);
+
     Tensor<T, D, HOST> copied(*this);
 #pragma unroll
-    for (int i = 0; i < D ; ++i) {
-      copied.shape_[i] = shape_[D - i - 1];
-      copied.stride_[i] = stride_[D - i - 1];
+    for (int i = a; i < b ; ++i) {
+      copied.shape_[i] = shape_[i + 1];
+      copied.stride_[i] = stride_[i + 1];
     }
-    if (get_flag(FLAG_CONTIGUOUS)) {
-      copied.unset_flag(FLAG_CONTIGUOUS);
-      copied.set_flag(FLAG_TRANSPOSED);
-    } else if (get_flag(FLAG_TRANSPOSED)){
-      copied.unset_flag(FLAG_TRANSPOSED);
-      copied.set_flag(FLAG_CONTIGUOUS);
-    } else {
-      // for the case that is not contiguous and not transposed
+    copied.shape_[b] = shape_[a];
+    copied.stride_[b] = stride_[a];
+
+    if constexpr (D == 2) {
+      if (get_flag(FLAG_CONTIGUOUS)) {
+        copied.unset_flag(FLAG_CONTIGUOUS);
+        copied.set_flag(FLAG_TRANSPOSED);
+      } else if (get_flag(FLAG_TRANSPOSED)) {
+        copied.unset_flag(FLAG_TRANSPOSED);
+        copied.set_flag(FLAG_CONTIGUOUS);
+      }
     }
     return (copied);
   }
@@ -388,5 +412,28 @@ Tensor<T, D, HOST> divide (
   return *out;
 }
 
+
+Tensor<size_type , 1, true> range(size_type size) {
+  Tensor<size_type , 1, true> re({size});
+  for (int i = 0; i < size; ++i) {
+    re.data()[i] = i;
+  }
+  return re;
+}
+
+namespace random {
+
+template<typename T, size_type D>
+Tensor<T, D, true> normal(T mean, T std_v, std::array<size_type, D > shape) {
+  Tensor<T, D, true> re(shape);
+  std::default_random_engine generator;
+  std::normal_distribution<T > distribution(mean, std_v);
+  for (size_type i=0; i < re.size(); i++) {
+    *(re.data() + i) = distribution(generator);
+  }
+  return re;
+}
+
+} ; // namesapce random
 } ; // namespace tensor
 #endif //TENSOR_TENSOR_H

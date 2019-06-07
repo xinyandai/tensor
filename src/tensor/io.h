@@ -13,7 +13,7 @@ namespace tensor {
 
 template <typename T>
 Tensor<T, 2, true>
-fvecs(const char* fvecs) {
+vecs(const char* fvecs) {
     std::ifstream fin(fvecs,
         std::ios::binary | std::ios::ate);
     if (!fin) {
@@ -33,7 +33,7 @@ fvecs(const char* fvecs) {
     int dim;
     fin.read(reinterpret_cast<char*>(&dim), sizeof(int));
 
-    size_t bytesPerRecord = dim * sizeof(T) + 4;
+    size_t bytesPerRecord = 1LL * dim * sizeof(T) + 4;
     if (fileSize % bytesPerRecord != 0) {
         char message[1024];
         sprintf(message, "File not aligned  [%s]", fvecs);

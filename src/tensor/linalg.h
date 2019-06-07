@@ -32,26 +32,27 @@ int dgemm_(
 namespace tensor {
 
 template<typename T>
-Tensor<T, 2> mm (
+Tensor<T, 2> _mm (
     const Tensor<T, 2> &a,
     const Tensor<T, 2> &b,
-    Tensor<T, 2> *out) {
-//  code seems strange here since blas is row based and tensor is
+    Tensor<T, 2> *out,
+    T alpha = 1.0f,
+    T beta = 0.0f) {
+//  alpha*op( A )*op( B ) + beta*C
+//  code seems strange here since tensor is row based and BLAS is
 //  column based. NT_A / NT_B is true if tensor a / b are already
 //  transposed. We regard tensor contiguous if the tensor is just
 //  transposed
   const bool NT_A = a.get_flag(FLAG_TRANSPOSED);
   const bool NT_B = b.get_flag(FLAG_TRANSPOSED);
 
-  if ((!a.get_flag(FLAG_CONTIGUOUS)) && (!NT_A)) {
+  if (!a.get_flag(FLAG_CONTIGUOUS | FLAG_TRANSPOSED)) {
     return mm(a.as_contiguous(), b, out);
   }
-  if ((!b.get_flag(FLAG_CONTIGUOUS)) && (!NT_B)) {
+  if (!b.get_flag(FLAG_CONTIGUOUS | FLAG_TRANSPOSED)) {
     return mm(a, b.as_contiguous(), out);
   }
-  //  alpha*op( A )*op( B ) + beta*C
-  T alpha = 1.0f;
-  T beta = 0.0f;
+
 //  M  specifies  the number  of rows  of the  matrix op( A )
 //  and of the  matrix  C.  M  must  be at least  zero.
   FINTEGER M = a.shape()[0] ;
@@ -62,8 +63,7 @@ Tensor<T, 2> mm (
 //  op( A ) and the number of rows of the matrix op( B ).
   FINTEGER K = a.shape()[1];
 
-  if (K != b.shape()[0] || M != out->shape()[0]
-  || N != out->shape()[1]) {
+  if (K != b.shape()[0] || M *N != out->size()) {
     throw std::runtime_error(
         "shape not matched in matrix multiplication.");
   }
@@ -97,13 +97,116 @@ Tensor<T, 2> mm (
 
 template<typename T>
 Tensor<T, 2> mm (
+  const Tensor<T, 2> &a,
+  const Tensor<T, 2> &b,
+  Tensor<T, 2> *out,
+  T alpha = 1.0f,
+  T beta = 0.0f) {
+  return _mm(b.transpose(), a.transpose(), out, alpha, beta);
+}
+
+template<typename T>
+Tensor<T, 2> mm (
     const Tensor<T, 2> &a,
-    const Tensor<T, 2> &b) {
+    const Tensor<T, 2> &b,
+    T alpha = 1.0f,
+    T beta = 0.0f) {
 
   Tensor<T, 2> out({a.shape()[0], b.shape()[1]});
-  mm(a, b, &out);
+  mm(a, b, &out, alpha, beta);
   return out;
 }
+
+template<typename T>
+Tensor<T, 1> mv (
+    const Tensor<T, 2> &a, const T *b, Tensor<T, 1> * out) {
+
+  size_type M = a.shape()[0], N = a.shape()[1];
+#pragma omp parallel for
+  for (int i = 0; i < M; ++i) {
+    out->data()[i] = fvec_inner_product(a.data()[i * N], b, N);
+  }
+}
+
+template<typename T>
+Tensor<T, 1> mv (const Tensor<T, 2> &a, const T *b) {
+  Tensor<T, 1> out({a.shape()[0]});
+  mm(a, *b, &out);
+  return out;
+}
+
+template<typename T, size_type  D>
+Tensor<T, D-1> norm_sqr(const Tensor<T, D> &a, size_type axis=D-1) {
+
+  const Tensor<T, D> moved_a = a.move_axis(axis, D-1);
+  std::array<size_type, D-1> shapes;
+#pragma unroll
+  for (size_type i = 0; i < D-1; ++i) {
+    shapes[i] = moved_a.shape()[i];
+  }
+  Tensor<T, D-1> sqr(shapes);
+  sqr.fill(0);
+  reduce_by_stride<T, D> (
+      sqr.data(), moved_a.data(),
+      sqr.stride().data(), moved_a.stride().data(),
+      moved_a.shape().data(),  norm_sqr_adder<T >());
+  return sqr;
+}
+
+template<typename T, size_type D>
+Tensor<size_type, D> top_select(const Tensor<T, D> &a, size_type K, size_type axis=D-1, bool desc = false) {
+
+  Tensor<T, D> moved_a = a.move_axis(axis, D-1);
+  std::array<size_type, D> shapes;
+#pragma unroll
+  for (size_type i = 0; i < D-1; ++i) {
+    shapes[i] = moved_a.shape()[i];
+  }
+  shapes[D-1] = K;
+  Tensor<size_type , D> indices(shapes);
+  if (K == moved_a.shape()[D-1]) {
+    reorder_by_stride<T, D> (
+      indices.data(), moved_a.data(),
+      indices.stride().data(), moved_a.stride().data(),
+      moved_a.shape().data(), K, desc, arg_sorter<T >());
+  } else {
+    reorder_by_stride<T, D> (
+      indices.data(), moved_a.data(),
+      indices.stride().data(), moved_a.stride().data(),
+      moved_a.shape().data(), K, desc, top_selector<T >());
+  }
+  return indices;
+}
+
+template<typename T, size_type  D>
+Tensor<T, D> arg_sort(const Tensor<T, D> &a, size_type axis=D-1, bool desc = false) {
+  return top_select(a, a.shape()[axis], axis, desc);
+}
+
+template <typename T>
+Tensor<T, 2> l2_sqr(
+    const Tensor<T, 2>& a,
+    const Tensor<T, 2>& b) {
+  if (a.shape()[1] != b.shape()[1])
+    throw std::runtime_error(
+        "dimension do not match when calculating l2 sqr dist");
+  const Tensor<T, 1> a_sqr = norm_sqr(a) ;
+  const Tensor<T, 1> b_sqr = norm_sqr(b) ;
+  Tensor<T, 2> m({a.shape()[0], b.shape()[0]});
+
+#pragma omp parallel for
+  for (int r = 0; r < m.shape()[0]; ++r) {
+    for (int c = 0; c < m.shape()[1]; ++c) {
+      m[{r, c}] = a_sqr[{r}] + b_sqr[{c}];
+    }
+  }
+
+  tensor::mm(a, b.transpose(), &m, -2.0f, 1.0f);
+
+  return m;
+}
+
+
 
 } // namespace tensor
 #endif //TENSOR_CALCULATOR_H
