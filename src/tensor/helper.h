@@ -55,7 +55,12 @@ struct subtract {
 };
 template<typename T>
 struct divider {
-  void operator()(T &a, const T &b) { a /= b; }
+  void operator()(T &a, const T &b) {
+    if (b==0) {
+      std::cout << "[warning] dived by 0.0" << std::endl;
+    }
+    a /= b;
+  }
 };
 template<typename T>
 struct assignment {
@@ -68,6 +73,22 @@ struct multiplier {
 template<typename T>
 struct norm_sqr_adder {
   void operator()(T &a, const T &b) { a += b * b; }
+};
+template<typename T>
+struct max_assigner {
+  void operator()(const T &a, const T &b) { if(a < b) a = b; }
+};
+template<typename T>
+struct min_assigner {
+  void operator()(const T &a, const T &b) { if(a > b) a = b; }
+};
+template<typename T>
+struct max_compare {
+   bool operator()(const T &a, const T &b) { return a < b; }
+};
+template<typename T>
+struct min_compare {
+  bool operator()(const T &a, const T &b) { return a > b; }
 };
 
 template<typename T>
@@ -144,7 +165,7 @@ operation_by_stride(T *data, const T *source,
       } else {
         operation_by_stride<T, data_N - 1, 0>(
             data, source, stride_data + 1,
-            stride_source + 1, shape + 1, f);
+            stride_source, shape + 1, f);
         data += *stride_data;
       }
     }
@@ -172,6 +193,7 @@ reduce_by_stride(T *data, const T *source,
                     F f) {
 
   if constexpr (N == 1) {
+    *data = 0;	  
     for (int i = 0; i < *(shape); ++i) {
       f(*data, *source);
       source += *(stride_source);
@@ -179,6 +201,34 @@ reduce_by_stride(T *data, const T *source,
   } else if constexpr (N > 1) {
     for (int i = 0; i < *shape; ++i) {
       reduce_by_stride<T, N - 1, F>(
+          data, source, stride_data + 1,
+          stride_source + 1, shape + 1, f);
+      data += *stride_data;
+      source += *stride_source;
+    }
+  }
+}
+template<typename T, size_type N, typename F>
+static void
+arg_reduce_by_stride(size_type *data, const T *source,
+                    const size_type *stride_data,
+                    const size_type *stride_source,
+                    const size_type *shape,
+                    F f) {
+
+  if constexpr (N == 1) {
+    *data = 0;
+    T m = *source;
+    for (int i = 1; i < *(shape); ++i) {
+      source += *(stride_source);
+      if (f(m, *source)) {
+        *data = i;
+        m = *source;
+      }
+    }
+  } else if constexpr (N > 1) {
+    for (int i = 0; i < *shape; ++i) {
+      arg_reduce_by_stride<T, N - 1, F>(
           data, source, stride_data + 1,
           stride_source + 1, shape + 1, f);
       data += *stride_data;
@@ -249,7 +299,7 @@ struct Slice {
   }
   explicit Slice(): begin_(0), end_(SLICE_END), step_(1) {};
   explicit Slice(size_type begin)
-      :begin_(begin), end_(SLICE_END), step_(1) {};
+      :begin_(begin), end_(begin+1), step_(1) {};
   explicit Slice(size_type begin, size_type end)
     :begin_(begin), end_(end), step_(1) {};
   explicit Slice(size_type begin, size_type end, size_type step)

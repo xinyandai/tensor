@@ -52,7 +52,7 @@ class Tensor {
 
  public:
   Tensor<T, D, HOST> operator[] (
-      std::array<Slice, D> slices) {
+      std::array<Slice, D> slices) const {
     Tensor<T, D, HOST> result;
     result.shape_ = {0};
     result.data_= data_;
@@ -231,6 +231,61 @@ class Tensor {
     out /= t;
     return out;
   }
+
+  Tensor& operator += (T t) {
+
+    operation_by_stride<T, D, 0 >(
+      data_, &t, stride_.data(), nullptr,
+      shape_.data(), adder<T >());
+    return *this;
+  }
+  Tensor& operator -= (T t) {
+
+    operation_by_stride<T, D, 0 >(
+      data_, &t, stride_.data(), nullptr,
+      shape_.data(), subtract<T >());
+    return *this;
+  }
+  Tensor& operator *= (T t) {
+
+    operation_by_stride<T, D, 0 >(
+      data_, &t, stride_.data(), nullptr,
+      shape_.data(), multiplier<T >());
+    return *this;
+  }
+  Tensor& operator /= (T t) {
+    operation_by_stride<T, D, 0 >(
+      data_, &t, stride_.data(), nullptr,
+      shape_.data(), divider<T >());
+    return *this;
+  }
+  Tensor<T, D, HOST> operator+ (T t) {
+    Tensor<T, D, HOST> out(shape_);
+    out = *this;
+    out += t;
+    return out;
+  }
+  template <size_type R>
+  Tensor<T, D, HOST> operator- (T t) {
+    Tensor<T, D, HOST> out(shape_);
+    out = *this;
+    out -= t;
+    return out;
+  }
+  template <size_type R>
+  Tensor<T, D, HOST> operator* (T t) {
+    Tensor<T, D, HOST> out(shape_);
+    out = *this;
+    out *= t;
+    return out;
+  }
+  template <size_type R>
+  Tensor<T, D, HOST> operator/ (T t) {
+    Tensor<T, D, HOST> out(shape_);
+    out = *this;
+    out /= t;
+    return out;
+  }
   ~ Tensor() = default;
 
   template <size_type R>
@@ -360,23 +415,6 @@ class Tensor {
 };
 
 
-template<typename T, size_type D,  bool HOST>
-Tensor<size_type, D, HOST> argsort (
-    const Tensor<T, D, HOST> &a,
-    size_type axis,
-    Tensor<size_type, D, HOST> *out = NULL) {}
-
-template<typename T, size_type D,  bool HOST>
-Tensor<size_type, D - 1, HOST> argmin (
-    const Tensor<T, D, HOST> &a,
-    size_type axis,
-    Tensor<size_type, D - 1, HOST> *out = NULL) {}
-
-template<typename T, size_type D,  bool HOST>
-Tensor<T, D - 1, HOST> min (
-    const Tensor<T, D, HOST> &a,
-    size_type axis,
-    Tensor<T, D - 1, HOST> *out = NULL) {}
 
 // tensor calculation
 template<typename T, size_type D,  bool HOST, class B>

@@ -118,6 +118,44 @@ Tensor<T, 2> mm (
 }
 
 template<typename T>
+Tensor<size_type, 1> vq (
+    const Tensor<T, 2> &a,
+    const Tensor<T, 2> &b) {
+
+  Tensor<T, 2> l2dist = l2_sqr(a, b);
+  return arg_min(l2dist, 1);
+}
+
+template<typename T>
+Tensor<T, 2> kmeans (const Tensor<T, 2> &x, 
+  const size_type K, const size_type n_iter) {
+  size_type N = x.shape()[0];
+  size_type D = x.shape()[1];
+  Tensor<T, 2> c = x[{S(0, K), S()}].as_contiguous();
+  for (size_type iter = 0; iter < n_iter; iter++) {
+    Tensor<size_type, 1> codes = vq(x, c);
+
+    Tensor<T, 1> counter({K});
+    counter.fill(0.f);
+    c.fill(0.f);
+    for (size_type i = 0; i < N; i++) {
+      size_type code_idx = codes[{i}];
+      c[{S(code_idx), S()}] += x[{S(i), S()}];
+      counter[{code_idx}] += 1;
+    }
+    for (size_type i = 0; i < K; i++) {
+      if (counter[{i}] > 0.0) {
+        c[{S(i), S()}] /= counter[{i}];
+      } else {
+        std::cout << "[warning]: empty bucket at iteration "
+          << iter + 1 << std::endl;
+      }
+    }
+  }
+  return c;
+}
+
+template<typename T>
 Tensor<T, 1> mv (
     const Tensor<T, 2> &a, const T *b, Tensor<T, 1> * out) {
 
@@ -135,8 +173,9 @@ Tensor<T, 1> mv (const Tensor<T, 2> &a, const T *b) {
   return out;
 }
 
-template<typename T, size_type  D>
-Tensor<T, D-1> norm_sqr(const Tensor<T, D> &a, size_type axis=D-1) {
+template<typename T, size_type  D, class F >
+Tensor<T, D-1> _reduce(
+  const Tensor<T, D> &a, size_type axis, F f) {
 
   const Tensor<T, D> moved_a = a.move_axis(axis, D-1);
   std::array<size_type, D-1> shapes;
@@ -145,16 +184,61 @@ Tensor<T, D-1> norm_sqr(const Tensor<T, D> &a, size_type axis=D-1) {
     shapes[i] = moved_a.shape()[i];
   }
   Tensor<T, D-1> sqr(shapes);
-  sqr.fill(0);
   reduce_by_stride<T, D> (
       sqr.data(), moved_a.data(),
       sqr.stride().data(), moved_a.stride().data(),
-      moved_a.shape().data(),  norm_sqr_adder<T >());
+      moved_a.shape().data(), f);
   return sqr;
 }
+template<typename T, size_type D, class F>
+Tensor<size_type, D-1> _arg_reduce(
+  const Tensor<T, D> &a, size_type axis, F f) {
+
+  const Tensor<T, D> moved_a = a.move_axis(axis, D-1);
+  std::array<size_type, D-1> shapes;
+#pragma unroll
+  for (size_type i = 0; i < D-1; ++i) {
+    shapes[i] = moved_a.shape()[i];
+  }
+  Tensor<size_type, D-1> indices(shapes);
+  arg_reduce_by_stride<T, D> (
+      indices.data(), moved_a.data(),
+      indices.stride().data(), moved_a.stride().data(),
+      moved_a.shape().data(), f);
+  return indices;
+}
+
+template<typename T, size_type  D>
+Tensor<T, D-1> norm_sqr(
+  const Tensor<T, D> &a, size_type axis=D-1) {
+  return  _reduce(a, axis, norm_sqr_adder<T >());
+}
+template<typename T, size_type  D>
+Tensor<T, D-1> max(
+  const Tensor<T, D> &a, size_type axis=D-1) {
+  return  _reduce(a, axis, max_assigner<T >());
+}
+template<typename T, size_type  D>
+Tensor<T, D-1> min(
+  const Tensor<T, D> &a, size_type axis=D-1) {
+  return  _reduce(a, axis, min_assigner<T >());
+}
+template<typename T, size_type  D>
+Tensor<size_type, D-1> arg_max(
+  const Tensor<T, D> &a, size_type axis=D-1) {
+  return _arg_reduce(a, axis, max_compare<T >());
+}
+template<typename T, size_type  D>
+Tensor<size_type, D-1> arg_min(
+  const Tensor<T, D> &a, size_type axis=D-1) {
+  return _arg_reduce(a, axis, min_compare<T >());
+}
+
 
 template<typename T, size_type D>
-Tensor<size_type, D> top_select(const Tensor<T, D> &a, size_type K, size_type axis=D-1, bool desc = false) {
+Tensor<size_type, D> top_select(
+  const Tensor<T, D> &a, size_type K,
+  size_type axis=D-1, bool desc = false) {
 
   Tensor<T, D> moved_a = a.move_axis(axis, D-1);
   std::array<size_type, D> shapes;
@@ -179,14 +263,14 @@ Tensor<size_type, D> top_select(const Tensor<T, D> &a, size_type K, size_type ax
 }
 
 template<typename T, size_type  D>
-Tensor<T, D> arg_sort(const Tensor<T, D> &a, size_type axis=D-1, bool desc = false) {
+Tensor<T, D> arg_sort(
+  const Tensor<T, D> &a, size_type axis=D-1, bool desc = false) {
   return top_select(a, a.shape()[axis], axis, desc);
 }
 
 template <typename T>
 Tensor<T, 2> l2_sqr(
-    const Tensor<T, 2>& a,
-    const Tensor<T, 2>& b) {
+  const Tensor<T, 2>& a, const Tensor<T, 2>& b) {
   if (a.shape()[1] != b.shape()[1])
     throw std::runtime_error(
         "dimension do not match when calculating l2 sqr dist");
